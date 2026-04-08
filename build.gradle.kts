@@ -49,6 +49,10 @@ intellijPlatform {
             recommended()
         }
     }
+
+    publishing {
+        token = providers.environmentVariable("JETBRAINS_MARKETPLACE_TOKEN")
+    }
 }
 
 tasks {

@@ -1,11 +1,19 @@
 <idea-plugin>
     <id>com.copyhelper</id>
     <name>Copy To Scratch</name>
-    <vendor>copyhelper</vendor>
+    <vendor url="https://github.com/hansvdam">hansvdam</vendor>
     <description><![CDATA[
         Copies the current text selection and inserts it at the cursor position
         in the most recently accessed scratch file, without switching focus.
     ]]></description>
+    <change-notes><![CDATA[
+        <b>1.0.0</b>
+        <ul>
+            <li>Initial release</li>
+            <li>Copy selection to the last opened scratch file</li>
+            <li>Keyboard shortcut support (Ctrl+Alt+Shift+V / Cmd+Alt+Ctrl+V on Mac)</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
