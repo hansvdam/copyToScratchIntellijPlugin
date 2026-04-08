@@ -1,0 +1,30 @@
+<idea-plugin>
+    <id>com.copyhelper</id>
+    <name>Copy To Scratch</name>
+    <vendor>copyhelper</vendor>
+    <description><![CDATA[
+        Copies the current text selection and inserts it at the cursor position
+        in the most recently accessed scratch file, without switching focus.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+
+    <actions>
+        <action
+            id="com.copyhelper.CopyToScratchAction"
+            class="com.copyhelper.CopyToScratchAction"
+            text="Copy Selection to Scratch"
+            description="Copies selected text to the caret position in the last opened scratch file">
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift V"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt ctrl V"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt ctrl V"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="CopyToScratch"
+                           displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>
