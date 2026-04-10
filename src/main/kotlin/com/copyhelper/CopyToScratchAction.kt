@@ -10,6 +10,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
@@ -62,53 +63,53 @@ class CopyToScratchAction : AnAction(), DumbAware {
     }
 
     private fun insertTextIntoScratch(project: Project, scratchFile: VirtualFile, text: String) {
-        val fem = FileEditorManager.getInstance(project)
-        val existingEditor = fem.getEditors(scratchFile).filterIsInstance<TextEditor>().firstOrNull()
+        val document = FileDocumentManager.getInstance().getDocument(scratchFile)
+        if (document == null) {
+            showNotification(project, "Could not open document for ${scratchFile.name}", NotificationType.ERROR)
+            return
+        }
+
+        // Use EditorFactory to find the actual Editor instance directly — this is more
+        // reliable than FileEditorManager.getEditors() which may return composite wrappers
+        // that don't pass filterIsInstance<TextEditor>().
+        val existingEditor = EditorFactory.getInstance().getEditors(document, project)
+            .firstOrNull { !it.isDisposed }
 
         if (existingEditor != null) {
-            // Scratch is already open — caret position is reliable
-            doInsertAtCaret(project, existingEditor, scratchFile, text)
+            val offset = existingEditor.caretModel.offset
+            WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
+                document.insertString(offset, "\n" + text)
+                existingEditor.caretModel.moveToOffset(offset + 1 + text.length)
+            })
+            showNotification(project, "Copied to ${scratchFile.name}", NotificationType.INFORMATION)
             return
         }
 
         // Scratch is not currently open — open it, then defer insertion so the
         // editor state (including caret position) has time to be restored from history.
+        val fem = FileEditorManager.getInstance(project)
         val opened = fem.openFile(scratchFile, false)
         val newEditor = opened.filterIsInstance<TextEditor>().firstOrNull()
 
         if (newEditor != null) {
             ApplicationManager.getApplication().invokeLater {
                 if (!project.isDisposed && scratchFile.isValid) {
-                    doInsertAtCaret(project, newEditor, scratchFile, text)
+                    val editor = newEditor.editor
+                    val offset = editor.caretModel.offset
+                    WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
+                        document.insertString(offset, "\n" + text)
+                        editor.caretModel.moveToOffset(offset + 1 + text.length)
+                    })
+                    showNotification(project, "Copied to ${scratchFile.name}", NotificationType.INFORMATION)
                 }
             }
         } else {
             // Fallback: no editor available, append to document end
-            val document = FileDocumentManager.getInstance().getDocument(scratchFile)
-            if (document == null) {
-                showNotification(project, "Could not open document for ${scratchFile.name}", NotificationType.ERROR)
-                return
-            }
-
             WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
                 document.insertString(document.textLength, "\n" + text)
             })
-
             showNotification(project, "Appended to end of ${scratchFile.name}", NotificationType.INFORMATION)
         }
-    }
-
-    private fun doInsertAtCaret(project: Project, textEditor: TextEditor, scratchFile: VirtualFile, text: String) {
-        val editor = textEditor.editor
-        val offset = editor.caretModel.offset
-        val document = editor.document
-
-        WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
-            document.insertString(offset, "\n" + text)
-            editor.caretModel.moveToOffset(offset + 1 + text.length)
-        })
-
-        showNotification(project, "Copied to ${scratchFile.name}", NotificationType.INFORMATION)
     }
 
     private fun showNotification(project: Project, content: String, type: NotificationType) {

@@ -7,6 +7,13 @@
         in the most recently accessed scratch file, without switching focus.
     ]]></description>
     <change-notes><![CDATA[
+        <b>1.1.0</b>
+        <ul>
+            <li>Insert into the last <i>focused</i> scratch file (based on editor history) instead of just open editors</li>
+            <li>Automatically open closed scratch files and restore caret position before inserting</li>
+            <li>Replace reflection-based history lookup with direct EditorHistoryManager API</li>
+            <li>Prepend newline before inserted text for cleaner formatting</li>
+        </ul>
         <b>1.0.0</b>
         <ul>
             <li>Initial release</li>
