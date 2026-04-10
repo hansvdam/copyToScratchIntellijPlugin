@@ -8,11 +8,12 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
-import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+import com.intellij.openapi.fileEditor.impl.EditorHistoryManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -32,7 +33,7 @@ class CopyToScratchAction : AnAction(), DumbAware {
         }
 
         val currentFile = e.getData(CommonDataKeys.VIRTUAL_FILE)
-        val scratchFile = findLastOpenedScratch(project, currentFile)
+        val scratchFile = findLastFocusedScratch(project, currentFile)
 
         if (scratchFile == null) {
             showNotification(project, "No scratch file found in open editors", NotificationType.WARNING)
@@ -48,30 +49,12 @@ class CopyToScratchAction : AnAction(), DumbAware {
         e.presentation.isEnabledAndVisible = e.project != null && hasSelection
     }
 
-    private fun findLastOpenedScratch(project: Project, currentFile: VirtualFile?): VirtualFile? {
-        // Check open editors for scratch files (most recently used order from editor history)
-        val fem = FileEditorManagerEx.getInstanceEx(project)
-
-        // Try open files first — look for scratch files that are not the current file
-        val openScratch = fem.openFiles
-            .filter { it != currentFile && isScratchFile(it) }
-            .firstOrNull()
-
-        if (openScratch != null) return openScratch
-
-        // Fallback: search editor history for recently accessed scratch files
-        try {
-            val historyClass = Class.forName("com.intellij.openapi.fileEditor.impl.EditorHistoryManager")
-            val getInstance = historyClass.getMethod("getInstance", Project::class.java)
-            val historyManager = getInstance.invoke(null, project)
-            val getFileList = historyClass.getMethod("getFileList")
-            @Suppress("UNCHECKED_CAST")
-            val fileList = getFileList.invoke(historyManager) as List<VirtualFile>
-            return fileList.asReversed()
-                .firstOrNull { it != currentFile && it.isValid && isScratchFile(it) }
-        } catch (_: Exception) {
-            return null
-        }
+    private fun findLastFocusedScratch(project: Project, currentFile: VirtualFile?): VirtualFile? {
+        // EditorHistoryManager tracks file access/focus order (oldest first),
+        // so reversing gives most-recently-focused first
+        val fileList = EditorHistoryManager.getInstance(project).fileList
+        return fileList.asReversed()
+            .firstOrNull { it != currentFile && it.isValid && isScratchFile(it) }
     }
 
     private fun isScratchFile(file: VirtualFile): Boolean {
@@ -80,22 +63,27 @@ class CopyToScratchAction : AnAction(), DumbAware {
 
     private fun insertTextIntoScratch(project: Project, scratchFile: VirtualFile, text: String) {
         val fem = FileEditorManager.getInstance(project)
-        val editors = fem.getEditors(scratchFile)
-        val textEditor = editors.filterIsInstance<TextEditor>().firstOrNull()
+        val existingEditor = fem.getEditors(scratchFile).filterIsInstance<TextEditor>().firstOrNull()
 
-        if (textEditor != null) {
-            val targetEditor = textEditor.editor
-            val offset = targetEditor.caretModel.offset
-            val document = targetEditor.document
+        if (existingEditor != null) {
+            // Scratch is already open — caret position is reliable
+            doInsertAtCaret(project, existingEditor, scratchFile, text)
+            return
+        }
 
-            WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
-                document.insertString(offset, text)
-                targetEditor.caretModel.moveToOffset(offset + text.length)
-            })
+        // Scratch is not currently open — open it, then defer insertion so the
+        // editor state (including caret position) has time to be restored from history.
+        val opened = fem.openFile(scratchFile, false)
+        val newEditor = opened.filterIsInstance<TextEditor>().firstOrNull()
 
-            showNotification(project, "Copied to ${scratchFile.name}", NotificationType.INFORMATION)
+        if (newEditor != null) {
+            ApplicationManager.getApplication().invokeLater {
+                if (!project.isDisposed && scratchFile.isValid) {
+                    doInsertAtCaret(project, newEditor, scratchFile, text)
+                }
+            }
         } else {
-            // Scratch file is in history but not currently open — append to end
+            // Fallback: no editor available, append to document end
             val document = FileDocumentManager.getInstance().getDocument(scratchFile)
             if (document == null) {
                 showNotification(project, "Could not open document for ${scratchFile.name}", NotificationType.ERROR)
@@ -103,11 +91,24 @@ class CopyToScratchAction : AnAction(), DumbAware {
             }
 
             WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
-                document.insertString(document.textLength, text)
+                document.insertString(document.textLength, "\n" + text)
             })
 
-            showNotification(project, "Appended to end of ${scratchFile.name} (file was not open)", NotificationType.INFORMATION)
+            showNotification(project, "Appended to end of ${scratchFile.name}", NotificationType.INFORMATION)
         }
+    }
+
+    private fun doInsertAtCaret(project: Project, textEditor: TextEditor, scratchFile: VirtualFile, text: String) {
+        val editor = textEditor.editor
+        val offset = editor.caretModel.offset
+        val document = editor.document
+
+        WriteCommandAction.runWriteCommandAction(project, "Copy to Scratch", null, {
+            document.insertString(offset, "\n" + text)
+            editor.caretModel.moveToOffset(offset + 1 + text.length)
+        })
+
+        showNotification(project, "Copied to ${scratchFile.name}", NotificationType.INFORMATION)
     }
 
     private fun showNotification(project: Project, content: String, type: NotificationType) {
